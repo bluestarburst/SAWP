@@ -37,7 +37,8 @@ class Message:
             current_msg = current_msg.msg
 
         nodes = list(reversed(nodes))
-        nodes.append(self.dst)
+        if self.dst != -1:
+            nodes.append(self.dst)
         return nodes
 
     def is_NULL_message(self):

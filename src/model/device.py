@@ -11,6 +11,7 @@ class Device:
     CLOCK_DRIFT_FREQ = 0 # should be [0, inf) in Hz
 
     # sets/selects a new clock drift value
+    @staticmethod
     def update_drift():
         return uniform(Device.CLOCK_DRIFT_LB, Device.CLOCK_DRIFT_UB)
 
@@ -59,9 +60,9 @@ class Device:
     #           on the path receive it
     #           Maybe make the TTL decrement condition more strict: ie, you have to be on the immediate diagonal or straight to not dec?
 
-    def __init__(self, device_ID, sim_tx_callback):
+    def __init__(self, device_ID, sim_tx_callback, assigned_channel=0):
         self.ID = device_ID
-        self.AB_protocol = AtomicBroadcast(ID=device_ID, rx_callback=self.device_receive_broadcast, tx_callback=sim_tx_callback)
+        self.AB_protocol = AtomicBroadcast(ID=device_ID, rx_callback=self.device_receive_broadcast, tx_callback=sim_tx_callback, channel_ID=assigned_channel)
         self.clock_drift = Device.update_drift()
 
         self.received_messages = {}
@@ -70,12 +71,15 @@ class Device:
 
     def work(self):
         print(f"{self.ID}: Sending")
-        message = Message(self.ID, -1, self.current_message_ID, f"Hi from {self.ID}")
-        self.current_message_ID += 1
-        self.send_message(message, channel_ID=0)
+        message = Message(self.ID, 14, self.current_message_ID, f"Hi from {self.ID}")
+        self.send_message(message)
 
-    def send_message(self, msg: Message, channel_ID, destination=-1):
-        self.AB_protocol.broadcast(msg, channel_ID, destination)
+    def send_message(self, msg: Message):
+        old_message_ID = self.current_message_ID
+        self.current_message_ID += 1
+        self.AB_protocol.broadcast(msg)
+        message_tag = (self.ID, old_message_ID)
+        self.received_messages[message_tag] = msg.get_encapsulated_msg()
 
     def sim_receive_broadcast(self, b_msg):
         self.AB_protocol.receive_broadcast(b_msg)

@@ -15,6 +15,13 @@ class SimEnvironment():
             self.layout.print_grid()
             print()
 
+    def did_receive_message(self, message_tag: tuple[int, int]):
+        for dv in self.device_list:
+            if not message_tag in dv.received_messages:
+                return False
+        else:
+            return True
+
     def add_device(self, d):
         if d.ID not in self.layout.positions:
             raise KeyError(d.ID)
@@ -37,7 +44,8 @@ class SimEnvironment():
             real_msgs = [m for m in msg_list if not m.is_NULL_message()]
             if not real_msgs:
                 print(f"Channel {channel_ID}: None valid")
-                return
+                raise Exception("Atomic Broadcast failed to guarantee message sending.")
+                
             src, dst = real_msgs[0].src, real_msgs[0].dst
             if dst == -1:
                 print(f"Channel {channel_ID}: src={src} (broadcast), reached={sorted(reached)}")
@@ -118,9 +126,14 @@ if __name__ == "__main__":
     positions = sim_device_positions()
     test_env = SimEnvironment(positions, verbose=True)
     for device_id in positions:
-        test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message))
+        channel = test_env.layout.channel(device_id)
+        test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message, assigned_channel=channel))
 
     test_env.simulate()
+    if test_env.did_receive_message((0, 0)):
+        print("Yay!!!")
+    else:
+        print("oof")
 
     #NOTE: Now we can check device.received_messages to check for correctness
     #      If an initated message isn't in there when the sim settles, it was lost
