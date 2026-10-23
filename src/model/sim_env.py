@@ -105,9 +105,17 @@ class SimEnvironment():
         for d in self.device_list:
             d.AB_protocol.new_event()
 
+def sim_device_positions(n=4):
+    #TODO:  Perhaps we try out different configurations:
+    #       Like diagonals ///
+    #       Or radiating from center
+    #
+    # This would be to reduce the bound on how long a AB takes--if it does
+    return {y * 4 + x: (x, y) for y in range(4) for x in range(4)}
+
 if __name__ == "__main__":
     # IDs 0-15, left to right across each row.
-    positions = {y * 4 + x: (x, y) for y in range(4) for x in range(4)}
+    positions = sim_device_positions()
     test_env = SimEnvironment(positions, verbose=True)
     for device_id in positions:
         test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message))
