@@ -113,13 +113,33 @@ class SimEnvironment():
         for d in self.device_list:
             d.AB_protocol.new_event()
 
-def sim_device_positions(n=4):
+def sim_device_positions(n=5):
     #TODO:  Perhaps we try out different configurations:
     #       Like diagonals ///
     #       Or radiating from center
     #
     # This would be to reduce the bound on how long a AB takes--if it does
     return {y * 4 + x: (x, y) for y in range(n) for x in range(n)}
+
+# L . . . L
+# . . . . .
+# . . L . .
+# . . . . .
+# L . . . L
+#TODO:  The device(s) need to know if they are a landmark node
+#       + all other landmark nodes (or just nearby ones?)
+#
+#       Do the protocol
+#
+#       Message TTL property/field + handling
+#
+#       Introduce special message types:
+#           New group request
+#           Landmark-landmark node survey message (just to get routes)
+#           Announce nascent group
+#           Add yourself to group cus you got left out, loser
+#       
+#           Normal/default/general broadcast
 
 if __name__ == "__main__":
     # IDs 0-15, left to right across each row.
