@@ -21,3 +21,13 @@ class GridLayout:
             for dx in (-1, 0, 1)
             if (dx or dy) and (x + dx, y + dy) in self._by_position
         ]
+
+    def print_grid(self):
+        xs = [x for x, _ in self._by_position]
+        ys = [y for _, y in self._by_position]
+        width = max((len(str(ID)) for ID in self.positions), default=1)
+        for y in range(min(ys), max(ys) + 1):
+            print(" ".join(
+                str(self._by_position.get((x, y), "_")).rjust(width)
+                for x in range(min(xs), max(xs) + 1)
+            ))

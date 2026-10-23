@@ -29,7 +29,7 @@ class AtomicBroadcast:
             self.accumated_faults += 1
             return True
 
-    def broadcast(self, b_msg, channel_ID, destination=-1):
+    def broadcast(self, b_msg, channel_ID=0, destination=-1):
         # send to all connected
         if self.accumated_sends <= self.f:
             attempts = [not self.check_failure() for _ in range(self.N)] # Success True, Failure False
@@ -40,7 +40,13 @@ class AtomicBroadcast:
 
     def forward_broadcast(self, b_msg: Message):
         # send to all connected (not original)
-        return self.broadcast(b_msg, b_msg.dst)
+
+        #return self.broadcast(b_msg, destination=b_msg.dst)
+        # Default to a broadcast right now
+        # We can maybe to fancy things here later
+
+        #NOTE: We should really chose a channel here instead of the default
+        return self.broadcast(b_msg, channel_ID=0, destination=-1)
 
 
     def receive_broadcast(self, b_msg: Message):
