@@ -113,3 +113,6 @@ if __name__ == "__main__":
         test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message))
 
     test_env.simulate()
+
+    #NOTE: Now we can check device.received_messages to check for correctness
+    #      If an initated message isn't in there when the sim settles, it was lost

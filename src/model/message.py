@@ -1,8 +1,9 @@
 class Message:
 
-    def __init__(self, src, dst, msg):
+    def __init__(self, src, dst, msg_ID, msg):
         self.src = src
         self.dst = dst
+        self.msg_ID = msg_ID
         self.msg = msg
         pass
 
@@ -10,14 +11,22 @@ class Message:
     def is_encapsulated(message):
         return isinstance(message, Message)
 
-    def encapsulate(self, source):
-        return Message(source, self.dst, self)
+    def encapsulate(self, source, destination=-1):
+        return Message(source, destination, self.msg_ID, self)
 
     def get_encapsulated_msg(self):
         current_msg = self.msg
         while Message.is_encapsulated(current_msg):
             current_msg = current_msg.msg
         return current_msg
+
+    def get_original_src(self):
+        current_msg = self.msg
+        current_src = self.src
+        while Message.is_encapsulated(current_msg):
+            current_src = current_msg.src
+            current_msg = current_msg.msg
+        return current_src
 
     def get_msg_route(self):
         nodes = []
@@ -36,4 +45,4 @@ class Message:
 
     @staticmethod
     def gen_NULL_message():
-        return Message(None, None, None)
+        return Message(None, None, None, None)

@@ -1,4 +1,5 @@
 from atomic_broadcast import AtomicBroadcast
+from message import Message
 from random import uniform
 
 class Device:
@@ -62,18 +63,32 @@ class Device:
         self.ID = device_ID
         self.AB_protocol = AtomicBroadcast(ID=device_ID, rx_callback=self.device_receive_broadcast, tx_callback=sim_tx_callback)
         self.clock_drift = Device.update_drift()
+
+        self.received_messages = {}
+        self.current_message_ID = 0
         pass
 
     def work(self):
         print(f"{self.ID}: Sending")
-        self.send_message(msg=f"Hi from {self.ID}", channel_ID=0)
+        message = Message(self.ID, -1, self.current_message_ID, f"Hi from {self.ID}")
+        self.current_message_ID += 1
+        self.send_message(message, channel_ID=0)
 
-    def send_message(self, msg: str, channel_ID, destination=-1):
+    def send_message(self, msg: Message, channel_ID, destination=-1):
         self.AB_protocol.broadcast(msg, channel_ID, destination)
 
     def sim_receive_broadcast(self, b_msg):
         self.AB_protocol.receive_broadcast(b_msg)
 
-    def device_receive_broadcast(self, b_msg):
-        print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
-        print(f"\tTrace: {b_msg.get_msg_route()}")
+    #NOTE: We maybe need tis to be a tad more advanced
+    #      Like, a device doesn't need to print for each time it sees the same message from the same original source
+    #
+    #      We give the device a list of received messages, and it one misses, we add it,
+    #      if it hits, we ignore--perhaps we implement message IDs for each device
+    #      Then the lookup is by (src_ID, msg_ID) which should keep things unique
+    def device_receive_broadcast(self, b_msg: Message):
+        message_tag = (b_msg.get_original_src(), b_msg.msg_ID)
+        if not message_tag in self.received_messages:
+            self.received_messages[message_tag] = b_msg.get_encapsulated_msg()
+            print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
+            print(f"\tTrace: {b_msg.get_msg_route()}")

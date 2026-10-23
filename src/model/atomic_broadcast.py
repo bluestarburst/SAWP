@@ -29,24 +29,22 @@ class AtomicBroadcast:
             self.accumated_faults += 1
             return True
 
-    def broadcast(self, b_msg, channel_ID=0, destination=-1):
+    def broadcast(self, b_msg: Message, channel_ID=0, destination=-1):
         # send to all connected
         if self.accumated_sends <= self.f:
             attempts = [not self.check_failure() for _ in range(self.N)] # Success True, Failure False
             self.accumated_sends += len(attempts)
 
             # For N, attempt that many transmits -> return list of messages of N length: either b_msgs or NULL_msgs
-            self.tx_callback([Message(self.ID, destination, b_msg) if a else Message.gen_NULL_message() for a in attempts], channel_ID)
+            self.tx_callback([b_msg if a else Message.gen_NULL_message() for a in attempts], channel_ID)
 
-    def forward_broadcast(self, b_msg: Message):
+    def forward_broadcast(self, b_msg: Message, dest=-1):
         # send to all connected (not original)
 
         #return self.broadcast(b_msg, destination=b_msg.dst)
-        # Default to a broadcast right now
-        # We can maybe to fancy things here later
 
         #NOTE: We should really chose a channel here instead of the default
-        return self.broadcast(b_msg, channel_ID=0, destination=-1)
+        return self.broadcast(b_msg.encapsulate(self.ID, dest), channel_ID=0, destination=dest)
 
 
     def receive_broadcast(self, b_msg: Message):
@@ -57,4 +55,5 @@ class AtomicBroadcast:
 
         # if we show up in the route, don't forward again
         if self.ID not in b_msg.get_msg_route():
+            #NOTE: Maybe we do fancy things with the dest instead of the default of broadcasting
             self.forward_broadcast(b_msg)
