@@ -80,12 +80,6 @@ class Device:
     def sim_receive_broadcast(self, b_msg):
         self.AB_protocol.receive_broadcast(b_msg)
 
-    #NOTE: We maybe need tis to be a tad more advanced
-    #      Like, a device doesn't need to print for each time it sees the same message from the same original source
-    #
-    #      We give the device a list of received messages, and it one misses, we add it,
-    #      if it hits, we ignore--perhaps we implement message IDs for each device
-    #      Then the lookup is by (src_ID, msg_ID) which should keep things unique
     def device_receive_broadcast(self, b_msg: Message):
         message_tag = (b_msg.get_original_src(), b_msg.msg_ID)
         if not message_tag in self.received_messages:

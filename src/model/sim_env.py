@@ -111,7 +111,7 @@ def sim_device_positions(n=4):
     #       Or radiating from center
     #
     # This would be to reduce the bound on how long a AB takes--if it does
-    return {y * 4 + x: (x, y) for y in range(4) for x in range(4)}
+    return {y * 4 + x: (x, y) for y in range(n) for x in range(n)}
 
 if __name__ == "__main__":
     # IDs 0-15, left to right across each row.
