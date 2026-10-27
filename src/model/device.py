@@ -1,6 +1,7 @@
 from atomic_broadcast import AtomicBroadcast
-from message import Message
+from message import Message, MessageType
 from random import uniform
+from group_membership import receive_control
 
 class Device:
 
@@ -67,7 +68,16 @@ class Device:
 
         self.received_messages = {}
         self.current_message_ID = 0
-        pass
+        # Each device keeps its own view and a new group request clears it
+        self.landmarks = frozenset()
+        self.group_id = None
+        self.group_members = set()
+        self.survey_routes = {}
+        self.group_announced = False
+
+    @property
+    def is_landmark(self):
+        return self.ID in self.landmarks
 
     def work(self):
         print(f"{self.ID}: Sending")
@@ -77,9 +87,19 @@ class Device:
     def send_message(self, msg: Message):
         old_message_ID = self.current_message_ID
         self.current_message_ID += 1
+        # Every control message needs a fresh ID even within the same phase
+        msg.msg_ID = old_message_ID
+        if msg.kind != MessageType.NORMAL:
+            self._receive_control(msg)  # A broadcast does not loop back to its sender
         self.AB_protocol.broadcast(msg)
         message_tag = (self.ID, old_message_ID)
         self.received_messages[message_tag] = msg.get_encapsulated_msg()
+
+    def send_control(self, kind, ttl, destination=-1, group_id=None, **data):
+        # Reuse the normal message path only the type and payload differ
+        data["group_id"] = self.group_id if group_id is None else group_id
+        self.send_message(Message(self.ID, destination, self.current_message_ID,
+                                  data, ttl=ttl, kind=kind))
 
     def sim_receive_broadcast(self, b_msg):
         self.AB_protocol.receive_broadcast(b_msg)
@@ -88,5 +108,12 @@ class Device:
         message_tag = (b_msg.get_original_src(), b_msg.msg_ID)
         if not message_tag in self.received_messages:
             self.received_messages[message_tag] = b_msg.get_encapsulated_msg()
-            print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
-            print(f"\tTrace: {b_msg.get_msg_route()}")
+            if b_msg.kind != MessageType.NORMAL:
+                self._receive_control(b_msg)
+            else:
+                print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
+                print(f"\tTrace: {b_msg.get_msg_route()}")
+
+    def _receive_control(self, message):
+        # Keep group rules separate from reading and printing normal messages
+        receive_control(self, message)

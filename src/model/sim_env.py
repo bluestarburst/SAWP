@@ -1,13 +1,19 @@
 from device import Device
 from grid import GridLayout
+from group_membership import form_group
 
 class SimEnvironment():
-    def __init__(self, positions, verbose=False):
+    def __init__(self, positions, verbose=False, landmarks=None):
         self.layout = GridLayout(positions)
+        # Share which devices are landmarks and let messages build the member list
+        self.landmarks = self.layout.landmarks() if landmarks is None else frozenset(landmarks)
+        if not self.landmarks <= positions.keys():
+            raise ValueError("Landmarks must have configured positions")
+        self.group_round = 0
         self.device_list = []
         self._devices_by_id = {}
         self.verbose = verbose
-        # Incoming messages waiting to be delivered, keyed by receiving device ID
+        # Store waiting messages for each receiving device
         self.message_FIFOs = {}
 
         if verbose:
@@ -29,11 +35,12 @@ class SimEnvironment():
             raise ValueError("Device ID already registered")
         self.device_list.append(d)
         self._devices_by_id[d.ID] = d
+        d.landmarks = self.landmarks
         self.message_FIFOs[d.ID] = []
         return d
 
     def outgoing_message(self, msg_list, channel_ID):
-        # Queue each message on the FIFO of every neighbor of its sender
+        # Add each message to the waiting list of every neighbor of its sender
         reached = set()
         for msg in msg_list:
             for n in self.get_neighbors(msg.src):
@@ -61,13 +68,16 @@ class SimEnvironment():
     def simulate(self, start_idx=0):
         # our funny starting point
         self.device_list[start_idx].work()
+        self.drain()
 
+    def drain(self):
+        # Finish waiting messages before starting the next group step
         step = 0
 
         # the actual simulation
-        #   If any device has messages to recieve, we take a simulation step
+        # Take a step while any device has messages waiting
         while any(self.message_FIFOs.values()):
-            # we snapshot the message queues so rebroadcasts don't appear in the same sim step
+            # Copy the waiting lists so new messages wait until the next step
             round_FIFOs = self.message_FIFOs
             self.message_FIFOs = {ID: [] for ID in round_FIFOs}
 
@@ -77,14 +87,13 @@ class SimEnvironment():
                 print(f"Simulation Step {step}")
 
             for ID, FIFO in round_FIFOs.items():
-                # We now group messages by channel and then source ot find any collisions
+                # Group messages by channel and sender to find collisions
                 channel_bursts = {}
                 for i, (msg, channel_ID) in enumerate(FIFO):
                     channel_bursts.setdefault(channel_ID, {}).setdefault(msg.src, []).append(i)
 
-                # Messages from different sources on the same channel collide and are dropped
-                # as groups since we can have n-way collisions.
-                # We do this till there is only one source per channel-message group
+                # Different senders on the same channel cause collisions
+                # Drop their attempts together until only one sender has attempts left
 
                 # just loop through and tag messages as dropped or not
                 dropped = [False] * len(FIFO)
@@ -113,20 +122,23 @@ class SimEnvironment():
         for d in self.device_list:
             d.AB_protocol.new_event()
 
+    def form_group(self, leader_id=None, survey_ttl=3):
+        # Run the group steps separately from the message loop
+        return form_group(self, leader_id, survey_ttl)
+
 def sim_device_positions(n=5):
-    #TODO:  Perhaps we try out different configurations:
-    #       Like diagonals ///
-    #       Or radiating from center
+    # Future layouts could use diagonal lines or spread from the center
     #
-    # This would be to reduce the bound on how long a AB takes--if it does
-    return {y * 4 + x: (x, y) for y in range(n) for x in range(n)}
+    # Compare layouts to find faster ways to send messages
+    # Use the grid size so larger grids do not reuse device IDs
+    return {y * n + x: (x, y) for y in range(n) for x in range(n)}
 
 # L . . . L
 # . . . . .
 # . . L . .
 # . . . . .
 # L . . . L
-#TODO:  The device(s) need to know if they are a landmark node
+#The device(s) need to know if they are a landmark node
 #       + all other landmark nodes (or just nearby ones?)
 #
 #       Do the protocol
@@ -142,18 +154,17 @@ def sim_device_positions(n=5):
 #           Normal/default/general broadcast
 
 if __name__ == "__main__":
-    # IDs 0-15, left to right across each row.
+    # The old four by four example used IDs zero through fifteen in row order
+    # This five by five grid puts landmarks at every third row and column
     positions = sim_device_positions()
     test_env = SimEnvironment(positions, verbose=True)
     for device_id in positions:
         channel = test_env.layout.channel(device_id)
         test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message, assigned_channel=channel))
 
-    test_env.simulate()
-    if test_env.did_receive_message((0, 0)):
-        print("Yay!!!")
-    else:
-        print("oof")
+    # Run the group example here and keep the old normal message example available
+    print("Landmarks:", sorted(test_env.landmarks))
+    print("Group members:", sorted(test_env.form_group()))
 
     #NOTE: Now we can check device.received_messages to check for correctness
     #      If an initated message isn't in there when the sim settles, it was lost

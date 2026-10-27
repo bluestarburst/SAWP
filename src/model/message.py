@@ -1,18 +1,35 @@
+from enum import Enum
+
+# W enums :)
+class MessageType(Enum):
+    # Tell group messages apart from normal messages
+    NORMAL = "normal"
+    GROUP_REQUEST = "group_request"
+    LANDMARK_SURVEY = "landmark_survey"
+    LANDMARK_REPORT = "landmark_report"
+    GROUP_ANNOUNCE = "group_announce"
+    GROUP_JOIN = "group_join"
+
+
 class Message:
 
-    def __init__(self, src, dst, msg_ID, msg):
+    def __init__(self, src, dst, msg_ID, msg, ttl=32, kind=MessageType.NORMAL):
         self.src = src
         self.dst = dst
         self.msg_ID = msg_ID
         self.msg = msg
-        pass
+        # Limit how far the message travels and record what kind of message it is
+        self.ttl = ttl
+        self.kind = kind
 
     @staticmethod
     def is_encapsulated(message):
         return isinstance(message, Message)
 
     def encapsulate(self, source, destination=-1):
-        return Message(source, destination, self.msg_ID, self)
+        # Each device that passes the message on uses one hop and keeps its kind
+        return Message(source, destination, self.msg_ID, self,
+                       ttl=self.ttl - 1, kind=self.kind)
 
     def get_encapsulated_msg(self):
         current_msg = self.msg
