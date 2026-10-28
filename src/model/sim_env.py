@@ -155,7 +155,7 @@ def sim_device_positions(n=5):
 
 if __name__ == "__main__":
     # The old four by four example used IDs zero through fifteen in row order
-    # This five by five grid puts landmarks at every third row and column
+    # This five by five grid puts landmarks at the four corners and the center
     positions = sim_device_positions()
     test_env = SimEnvironment(positions, verbose=True)
     for device_id in positions:

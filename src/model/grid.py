@@ -22,13 +22,19 @@ class GridLayout:
             if (dx or dy) and (x + dx, y + dy) in self._by_position
         ]
 
-    def landmarks(self, spacing=3):
-        # Choose landmarks on a smaller grid or use the lowest device ID if none fit
-        if spacing < 1:
-            raise ValueError("Landmark spacing must be positive")
-        selected = {ID for ID, (x, y) in self.positions.items()
-                    if x % spacing == 0 and y % spacing == 0}
-        return frozenset(selected or sorted(self.positions)[:1])
+    def landmarks(self):
+        # Pick the four corners and the center of the layout
+        if not self.positions:
+            return frozenset()
+        xs, ys = zip(*self.positions.values())
+        left, right = min(xs), max(xs)
+        bottom, top = min(ys), max(ys)
+        targets = [(left, bottom), (right, bottom), (left, top), (right, top),
+                   ((left + right) / 2, (bottom + top) / 2)]
+        # Use the nearest device for gaps and break ties with the lowest ID
+        return frozenset(min(self.positions, key=lambda ID: (
+            (self.positions[ID][0] - x) ** 2 + (self.positions[ID][1] - y) ** 2, ID))
+            for x, y in targets)
 
     def print_grid(self):
         xs = [x for x, _ in self._by_position]

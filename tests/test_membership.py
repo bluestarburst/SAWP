@@ -25,22 +25,34 @@ def make_environment(positions, missing=(), landmarks=None, traffic=None):
 
 
 class MembershipTests(unittest.TestCase):
-    def test_grid_generator_and_landmark_subgrid(self):
+    def test_grid_generator_and_corner_center_landmarks(self):
         env = make_environment(sim_device_positions(5))
         self.assertEqual(len(env.layout.positions), 25)
-        self.assertEqual(env.landmarks, {0, 3, 15, 18})
+        self.assertEqual(env.landmarks, {0, 4, 12, 20, 24})
 
         for device in env.device_list:
             self.assertEqual(device.is_landmark, device.ID in env.landmarks)
             self.assertEqual(device.landmarks, env.landmarks)
+
+        positions = sim_device_positions(5)
+        shifted = {ID: (x - 7, y - 9) for ID, (x, y) in reversed(list(positions.items()))}
+        gaps = {ID: cell for ID, cell in positions.items() if ID not in {0, 12}}
+        cases = [(shifted, {0, 4, 12, 20, 24}),
+                 (gaps, {1, 4, 7, 20, 24}),
+                 (sim_device_positions(4), {0, 3, 5, 12, 15}),
+                 ({99: (-2, -3)}, {99}),
+                 ({}, set())]
+        for layout, expected in cases:
+            with self.subTest(positions=layout):
+                self.assertEqual(make_environment(layout).landmarks, expected)
 
     def test_groups_converge_from_delivered_routes_and_missing_node_joins(self):
         cells = [(x, y) for y in range(-3, 4) for x in range(-3, 4)
                  if (x, y) not in {(-1, 0), (0, 0), (1, 1)}]
         cases = [
             (sim_device_positions(4), (), None, None),
-            (sim_device_positions(5), (), {0, 4, 12, 20, 24}, None),
-            (sim_device_positions(5), {0, 6, 12, 18}, None, 3),
+            (sim_device_positions(5), (), {0, 12}, None),
+            (sim_device_positions(5), {0, 6, 12, 24}, None, 4),
             ({100 + i * 7: cell for i, cell in enumerate(cells)}, (), None, None),
         ]
         for positions, missing, landmarks, leader in cases:
