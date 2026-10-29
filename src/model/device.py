@@ -1,7 +1,7 @@
 from atomic_broadcast import AtomicBroadcast
-from message import Message, MessageType
+from message import MessageType, Message
 from random import uniform
-from group_membership import receive_control
+from group_membership import GroupMembership
 
 class Device:
 
@@ -61,59 +61,85 @@ class Device:
     #           on the path receive it
     #           Maybe make the TTL decrement condition more strict: ie, you have to be on the immediate diagonal or straight to not dec?
 
-    def __init__(self, device_ID, sim_tx_callback, assigned_channel=0):
+    def __init__(self, device_ID, sim_tx_callback, assigned_channel=0, is_center_landmark=False, is_landmark=False):
         self.ID = device_ID
         self.AB_protocol = AtomicBroadcast(ID=device_ID, rx_callback=self.device_receive_broadcast, tx_callback=sim_tx_callback, channel_ID=assigned_channel)
+        self.Group_Membership = GroupMembership(device_id=device_ID, device_broadcast_cb=self.AB_protocol.broadcast, device_msg_ID_cb=self.inc_message_ID_callback, is_chief_landmark=is_center_landmark, is_landmark=is_landmark)
         self.clock_drift = Device.update_drift()
 
         self.received_messages = {}
         self.current_message_ID = 0
         # Each device keeps its own view and a new group request clears it
-        self.landmarks = frozenset()
         self.group_id = None
         self.group_members = set()
         self.survey_routes = {}
         self.group_announced = False
 
-    @property
-    def is_landmark(self):
-        return self.ID in self.landmarks
+        self.is_chief_landmark = is_center_landmark
+        self.is_landmark = is_landmark
 
-    def work(self):
-        print(f"{self.ID}: Sending")
-        message = Message(self.ID, 14, self.current_message_ID, f"Hi from {self.ID}")
-        self.send_message(message)
+    def inc_message_ID_callback(self):
+        self.current_message_ID += 1
+        return self.current_message_ID
+
+    # def work(self):
+    #     print(f"{self.ID}: Sending")
+    #     message = Message(self.ID, 14, self.current_message_ID, f"Hi from {self.ID}")
+    #     self.send_message(message)
 
     def send_message(self, msg: Message):
         old_message_ID = self.current_message_ID
         self.current_message_ID += 1
         # Every control message needs a fresh ID even within the same phase
         msg.msg_ID = old_message_ID
-        if msg.kind != MessageType.NORMAL:
-            self._receive_control(msg)  # A broadcast does not loop back to its sender
         self.AB_protocol.broadcast(msg)
         message_tag = (self.ID, old_message_ID)
         self.received_messages[message_tag] = msg.get_encapsulated_msg()
 
-    def send_control(self, kind, ttl, destination=-1, group_id=None, **data):
-        # Reuse the normal message path only the type and payload differ
-        data["group_id"] = self.group_id if group_id is None else group_id
-        self.send_message(Message(self.ID, destination, self.current_message_ID,
-                                  data, ttl=ttl, kind=kind))
 
-    def sim_receive_broadcast(self, b_msg):
+    def sim_receive_broadcast(self, b_msg: Message):
+
+        #Group Membership snooping
+        match b_msg.kind:
+            case MessageType.GROUP_REQUEST:
+                self.Group_Membership.saw_new_group_message()
+            case MessageType.LANDMARK_SURVEY:
+                route = b_msg.get_msg_route() #get rid of -1 if its in ???
+                while -1 in route:
+                    route.remove(-1)
+                self.Group_Membership.note_route_surveyed(route)
+                pass
+            case MessageType.LANDMARK_SURVEY_RESULTS:
+                if self.is_chief_landmark:
+                    members: list = b_msg.get_encapsulated_msg()
+                    self.Group_Membership.seen_survey_results(members)
+                pass
+            case MessageType.GROUP_ANNOUNCE:
+                members: list = b_msg.get_encapsulated_msg()
+                self.Group_Membership.seen_group_announce(members)
+                pass
+            case MessageType.GROUP_JOIN:
+                stragler_ID = b_msg.get_original_src()
+                self.Group_Membership.add_group_stragler(stragler_ID)
+                pass
+            case _:
+                pass
+
         self.AB_protocol.receive_broadcast(b_msg)
+
+    
+    def sim_step_changed(self, new_sim_step):
+        self.Group_Membership.simulation_advanced(new_sim_step)
+        # + any other "async" events/structures that would need it
+
 
     def device_receive_broadcast(self, b_msg: Message):
         message_tag = (b_msg.get_original_src(), b_msg.msg_ID)
         if not message_tag in self.received_messages:
             self.received_messages[message_tag] = b_msg.get_encapsulated_msg()
-            if b_msg.kind != MessageType.NORMAL:
-                self._receive_control(b_msg)
-            else:
-                print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
-                print(f"\tTrace: {b_msg.get_msg_route()}")
+            print(f"Device({self.ID}) Received: {b_msg.get_encapsulated_msg()}")
+            print(f"\tTrace: {b_msg.get_msg_route()}")
 
-    def _receive_control(self, message):
-        # Keep group rules separate from reading and printing normal messages
-        receive_control(self, message)
+    def __str__(self) -> str:
+        return f"{self.ID}"# {str(self.Group_Membership)}"
+

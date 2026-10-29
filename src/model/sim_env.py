@@ -1,6 +1,6 @@
 from device import Device
 from grid import GridLayout
-from group_membership import form_group
+from config import GRID_SIZE
 
 class SimEnvironment():
     def __init__(self, positions, verbose=False, landmarks=None):
@@ -10,7 +10,7 @@ class SimEnvironment():
         if not self.landmarks <= positions.keys():
             raise ValueError("Landmarks must have configured positions")
         self.group_round = 0
-        self.device_list = []
+        self.device_list: list[Device] = []
         self._devices_by_id = {}
         self.verbose = verbose
         # Store waiting messages for each receiving device
@@ -20,6 +20,11 @@ class SimEnvironment():
             print("Grid layout:")
             self.layout.print_grid()
             print()
+
+    def update_device_on_sim_step(self, step):
+        #for d in devices, call d.update or smthn
+        for d in self.device_list:
+            d.sim_step_changed(step)
 
     def did_receive_message(self, message_tag: tuple[int, int]):
         for dv in self.device_list:
@@ -65,66 +70,78 @@ class SimEnvironment():
         return [self._devices_by_id[ID] for ID in self.layout.neighbors(source_ID)
                 if ID in self._devices_by_id]
         
-    def simulate(self, start_idx=0):
-        # our funny starting point
-        self.device_list[start_idx].work()
-        self.drain()
 
-    def drain(self):
-        # Finish waiting messages before starting the next group step
-        step = 0
+    def advance_simulation_message_broadcasts(self):
 
         # the actual simulation
         # Take a step while any device has messages waiting
-        while any(self.message_FIFOs.values()):
-            # Copy the waiting lists so new messages wait until the next step
-            round_FIFOs = self.message_FIFOs
-            self.message_FIFOs = {ID: [] for ID in round_FIFOs}
 
-            step += 1
+        #NOTE: We retrofitted this to take one simulation step at a time
+        #while any(self.message_FIFOs.values()):
+
+        # Copy the waiting lists so new messages wait until the next step
+        round_FIFOs = self.message_FIFOs
+        self.message_FIFOs = {ID: [] for ID in round_FIFOs}
+
+        for ID, FIFO in round_FIFOs.items():
+            # Group messages by channel and sender to find collisions
+            channel_bursts = {}
+            for i, (msg, channel_ID) in enumerate(FIFO):
+                channel_bursts.setdefault(channel_ID, {}).setdefault(msg.src, []).append(i)
+
+            # Different senders on the same channel cause collisions
+            # Drop their attempts together until only one sender has attempts left
+
+            # just loop through and tag messages as dropped or not
+            dropped = [False] * len(FIFO)
+            for bursts in channel_bursts.values():
+                remaining = list(bursts.values())
+                while len(remaining) > 1:
+                    for b in remaining:
+                        dropped[b.pop(0)] = True
+                    remaining = [b for b in remaining if b]
 
             if self.verbose:
-                print(f"Simulation Step {step}")
+                # keep track of all that collided
+                drops = {}
+                for (msg, channel_ID), is_dropped in zip(FIFO, dropped):
+                    if is_dropped:
+                        by_src = drops.setdefault(channel_ID, {})
+                        by_src[msg.src] = by_src.get(msg.src, 0) + 1
+                for channel_ID, by_src in drops.items():
+                    summary = ", ".join(f"{n} from src {src}" for src, n in sorted(by_src.items()))
+                    print(f"Collision at device {ID}, channel {channel_ID}: dropped {summary}")
 
-            for ID, FIFO in round_FIFOs.items():
-                # Group messages by channel and sender to find collisions
-                channel_bursts = {}
-                for i, (msg, channel_ID) in enumerate(FIFO):
-                    channel_bursts.setdefault(channel_ID, {}).setdefault(msg.src, []).append(i)
+            for (msg, _), is_dropped in zip(FIFO, dropped):
+                if not is_dropped:
+                    self._devices_by_id[ID].sim_receive_broadcast(msg)
 
-                # Different senders on the same channel cause collisions
-                # Drop their attempts together until only one sender has attempts left
 
-                # just loop through and tag messages as dropped or not
-                dropped = [False] * len(FIFO)
-                for bursts in channel_bursts.values():
-                    remaining = list(bursts.values())
-                    while len(remaining) > 1:
-                        for b in remaining:
-                            dropped[b.pop(0)] = True
-                        remaining = [b for b in remaining if b]
+    # def form_group(self, leader_id=None, survey_ttl=3):
+    #     # Run the group steps separately from the message loop
+    #     return form_group(self, leader_id, survey_ttl)
 
-                if self.verbose:
-                    # keep track of all that collided
-                    drops = {}
-                    for (msg, channel_ID), is_dropped in zip(FIFO, dropped):
-                        if is_dropped:
-                            by_src = drops.setdefault(channel_ID, {})
-                            by_src[msg.src] = by_src.get(msg.src, 0) + 1
-                    for channel_ID, by_src in drops.items():
-                        summary = ", ".join(f"{n} from src {src}" for src, n in sorted(by_src.items()))
-                        print(f"Collision at device {ID}, channel {channel_ID}: dropped {summary}")
+    def run(self, sim_bound=100):
 
-                for (msg, _), is_dropped in zip(FIFO, dropped):
-                    if not is_dropped:
-                        self._devices_by_id[ID].sim_receive_broadcast(msg)
+        current_sim_step = 0
 
+        # tell someone to do something
+        self.device_list[0].Group_Membership.form_group()
+
+        while current_sim_step < sim_bound:
+            self.advance_simulation_message_broadcasts()
+            self.update_device_on_sim_step(current_sim_step)
+            current_sim_step += 1
+            # print("\t", current_sim_step)
+
+        # check if the thing got done;;;
         for d in self.device_list:
-            d.AB_protocol.new_event()
+            if d.Group_Membership.group_valid_flag:
+                print(f"{str(d)} in Group")
 
-    def form_group(self, leader_id=None, survey_ttl=3):
-        # Run the group steps separately from the message loop
-        return form_group(self, leader_id, survey_ttl)
+        print("Simulation Done !OwO!")
+
+        
 
 def sim_device_positions(n=5):
     # Future layouts could use diagonal lines or spread from the center
@@ -156,15 +173,25 @@ def sim_device_positions(n=5):
 if __name__ == "__main__":
     # The old four by four example used IDs zero through fifteen in row order
     # This five by five grid puts landmarks at the four corners and the center
-    positions = sim_device_positions()
+    positions = sim_device_positions(GRID_SIZE)
     test_env = SimEnvironment(positions, verbose=True)
     for device_id in positions:
         channel = test_env.layout.channel(device_id)
-        test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message, assigned_channel=channel))
+        # get very center (offset -2 mod 4)
+
+        recovered_x = positions[device_id][0]
+        recovered_y = positions[device_id][1]
+
+        is_landmark = (recovered_x % 4 == 0 and recovered_y % 4 == 0) or (recovered_x % 4 == 2 and recovered_y % 4 == 2)
+        is_center_landmark = (recovered_x % 4 == 2) and (recovered_y % 4 == 2)
+        print(f"Device {device_id}: ({recovered_x}, {recovered_y}) - Landmark: {is_landmark}, Center: {is_center_landmark}")
+        test_env.add_device(Device(device_ID=device_id, sim_tx_callback=test_env.outgoing_message, assigned_channel=channel, is_center_landmark=is_center_landmark, is_landmark=is_landmark))
 
     # Run the group example here and keep the old normal message example available
     print("Landmarks:", sorted(test_env.landmarks))
-    print("Group members:", sorted(test_env.form_group()))
+    # print("Group members:", sorted(test_env.form_group()))
+    
+    test_env.run()
 
     #NOTE: Now we can check device.received_messages to check for correctness
     #      If an initated message isn't in there when the sim settles, it was lost

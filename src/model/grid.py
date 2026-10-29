@@ -23,15 +23,16 @@ class GridLayout:
         ]
 
     def landmarks(self):
-        # Pick the four corners and the center of the layout
+        # Assuming infinite grid positions, pick corners and center separately using mod 4
         if not self.positions:
             return frozenset()
-        xs, ys = zip(*self.positions.values())
-        left, right = min(xs), max(xs)
-        bottom, top = min(ys), max(ys)
-        targets = [(left, bottom), (right, bottom), (left, top), (right, top),
-                   ((left + right) / 2, (bottom + top) / 2)]
-        # Use the nearest device for gaps and break ties with the lowest ID
+
+        targets = [(x, y) for x, y in self.positions.values() if (x % 4 == 0 and y % 4 == 0) or (x % 4 == 2 and y % 4 == 2)]
+        # TODO: optimally create positions from position shape instead of looping through every position
+
+
+
+        # Use the nearest device for filling gaps and break ties with the lowest ID
         return frozenset(min(self.positions, key=lambda ID: (
             (self.positions[ID][0] - x) ** 2 + (self.positions[ID][1] - y) ** 2, ID))
             for x, y in targets)

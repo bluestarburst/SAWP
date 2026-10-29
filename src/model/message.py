@@ -1,4 +1,7 @@
 from enum import Enum
+import math
+
+from config import DEFAULT_TTL
 
 # W enums :)
 class MessageType(Enum):
@@ -6,14 +9,14 @@ class MessageType(Enum):
     NORMAL = "normal"
     GROUP_REQUEST = "group_request"
     LANDMARK_SURVEY = "landmark_survey"
-    LANDMARK_REPORT = "landmark_report"
+    LANDMARK_SURVEY_RESULTS = "landmark_survey_results"
     GROUP_ANNOUNCE = "group_announce"
     GROUP_JOIN = "group_join"
 
 
 class Message:
 
-    def __init__(self, src, dst, msg_ID, msg, ttl=32, kind=MessageType.NORMAL):
+    def __init__(self, src, dst, msg_ID, msg, ttl=DEFAULT_TTL, kind=MessageType.NORMAL):
         self.src = src
         self.dst = dst
         self.msg_ID = msg_ID
@@ -29,7 +32,7 @@ class Message:
     def encapsulate(self, source, destination=-1):
         # Each device that passes the message on uses one hop and keeps its kind
         return Message(source, destination, self.msg_ID, self,
-                       ttl=self.ttl - 1, kind=self.kind)
+                       ttl=max(-1, self.ttl - 1), kind=self.kind)
 
     def get_encapsulated_msg(self):
         current_msg = self.msg

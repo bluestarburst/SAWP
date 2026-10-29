@@ -1,81 +1,145 @@
 """Group code kept separate from devices and radios"""
 
-from message import MessageType
+from message import Message, MessageType
+from config import SURVEY_TTL, SURVEY_TIMESPAN, GROUP_MSG_PROPOGATE_TIMESPAN
+
+class GroupMembership():
+
+    def __init__(self, device_id, device_broadcast_cb, device_msg_ID_cb, is_chief_landmark=False, is_landmark=False):
+        self.device_broadcast_cb = device_broadcast_cb
+        self.group_members = []
+        self.group_ID = -1
+        self.device_id = device_id
+        self.is_landmark = is_landmark
+        self.device_msg_ID_cb = device_msg_ID_cb
+
+        self.in_init_group_phase = False
+        self.in_survey_phase = False
+        self.coalesce_responsible = is_chief_landmark
+        self.in_coalesce_phase = False
+        self.in_group_finalize_phase = False
+
+        self.seen_routes = []
+
+        self.sim_step_checkpoint = 0
+        self.current_sim_step = 0
+
+        self.group_valid_flag = False
+
+    #TODO device will invoke this after startup when a random timer expires
+    def form_group(self):
+        self.local_form_group_setup()
+        self.device_broadcast_cb(Message(src=self.device_id, dst=-1, msg_ID=self.device_msg_ID_cb(), msg=f"", kind=MessageType.GROUP_REQUEST))
+
+    #TODO eventually we want some message to set the new group_ID, rn we increment and hope it's in synch...
+
+    def local_form_group_setup(self):
+        self.group_valid_flag = False
+        self.group_members = []
+        self.group_ID += 1
+        self.seen_routes = []
+
+        #if we are a landmark, we need to wait for everyone to get the new_group message
+        #   This is incase some groups in future implementations dont want to be invalidated + other reason(s)?
+        if self.is_landmark:
+            self.in_init_group_phase = True
+
+    def note_route_surveyed(self, route):
+        self.seen_routes += route
+
+    def add_group_stragler(self, stragler_ID):
+        self.group_members.append(stragler_ID)
+        self.group_members = list(set(self.group_members))
+
+    def seen_group_announce(self, group_members):
+        self.group_members = group_members
+        #TODO invoke a device callback if we aren't in this list--it will decide if we want to join and send the me-too message
+        if self.device_id not in group_members:
+            # if we want in
+            group_members.append(self.device_id)
+            self.device_broadcast_cb(Message(src=self.device_id, dst=-1, msg_ID=self.device_msg_ID_cb(), msg=f"", kind=MessageType.GROUP_JOIN))
+
+        # Depending on if the device declines the group, this is not always True at end of function
+        self.group_valid_flag = True
 
 
-def receive_control(device, message):
-    data = message.get_encapsulated_msg()
-    group_id = data["group_id"]  # Round number and leader ID
-    origin = message.get_original_src()
-    if message.kind == MessageType.GROUP_REQUEST:
-        if origin != group_id[1] or origin not in device.landmarks:
+    def seen_survey_results(self, survey_results):
+        if not self.coalesce_responsible:
             return
-        if device.group_id is None or group_id > device.group_id:
-            device.group_id = group_id
-            device.group_members.clear()
-            device.survey_routes.clear()
-            device.group_announced = False
-        return
-    if group_id != device.group_id:
-        return  # Ignore messages from a different group
-    if message.kind == MessageType.LANDMARK_SURVEY and device.is_landmark and origin in device.landmarks:
-        route = message.get_msg_route()
-        if route[-1] != device.ID:
-            route.append(device.ID)
-        # Keep only the first route from each landmark
-        device.survey_routes.setdefault(origin, tuple(route))
-    elif message.kind == MessageType.LANDMARK_REPORT and device.ID == group_id[1] and origin in device.landmarks:
-        device.group_members.update(data["members"])
-    elif message.kind == MessageType.GROUP_ANNOUNCE and origin == group_id[1]:
-        device.group_members = set(data["members"])
-        device.group_announced = True
-    elif message.kind == MessageType.GROUP_JOIN and device.group_announced:
-        device.group_members.add(origin)
+        
+        self.group_members = list(set(self.group_members + survey_results))
 
 
-def form_group(env, leader_id=None, survey_ttl=3):
-    """Request a group then collect routes and add any missing devices"""
-    if not env.landmarks:
-        raise ValueError("Configure at least one landmark")
-    if survey_ttl < 1:
-        raise ValueError("Survey TTL must be positive")
-    leader_id = min(env.landmarks) if leader_id is None else leader_id
-    if leader_id not in env.landmarks or leader_id not in env._devices_by_id:
-        raise ValueError("Choose a registered landmark as leader")
-    env.drain()
-    env.group_round += 1
-    group_id = (env.group_round, leader_id)
-    leader = env._devices_by_id[leader_id]
-    # The longest route without loops has one fewer hop than the number of devices
-    ttl = max(1, len(env.layout.positions) - 1)
-    leader.send_control(MessageType.GROUP_REQUEST, ttl, group_id=group_id)
-    env.drain()
+    # send only to immediately available landmarks
+    #   Instead of broadcast with dest=-1
+    #   NOTE: Each landmark needs to know its neighboring landmark IDs
+    def survey_landmark_routes(self):
+        if not self.is_landmark:
+            return
+        
+        self.in_survey_phase = True
+        self.sim_step_checkpoint = self.current_sim_step
 
-    # Give landmarks turns in ID order and skip quiet ones
-    landmarks = [env._devices_by_id[ID] for ID in sorted(env.landmarks)
-                 if ID in env._devices_by_id and env._devices_by_id[ID].group_id == group_id]
-    for device in landmarks:
-        device.send_control(MessageType.LANDMARK_SURVEY, survey_ttl)
-        env.drain()
-    for device in landmarks:
-        observed = {device.ID}
-        for route in device.survey_routes.values():
-            observed.update(route)
-        device.send_control(MessageType.LANDMARK_REPORT, ttl,
-                            destination=leader_id, members=sorted(observed))
-        env.drain()
+        self.device_broadcast_cb(Message(src=self.device_id, dst=-1, ttl=SURVEY_TTL, msg_ID=self.device_msg_ID_cb(), msg=f"", kind=MessageType.LANDMARK_SURVEY))
+        pass
 
-    # Build the first member list only from received reports
-    leader.send_control(MessageType.GROUP_ANNOUNCE, ttl,
-                        members=sorted(leader.group_members))
-    env.drain()
-    for device in sorted(env.device_list, key=lambda d: d.ID):
-        if device.group_id == group_id and device.group_announced and device.ID not in device.group_members:
-            device.send_control(MessageType.GROUP_JOIN, ttl)
-            env.drain()
+    # send the surveyed routes we RECEIVED to our center/diagonal landmark
+    def coalesce_survey_routes(self):
+        if not self.is_landmark:
+            return
 
-    members = frozenset(leader.group_members)
-    if any(d.group_id != group_id or not d.group_announced or
-           d.group_members != members or d.ID not in members for d in env.device_list):
-        raise RuntimeError("Group did not converge: check connectivity, channels, and delivery")
-    return members
+        survey_results = list(set(self.seen_routes))
+
+        self.device_broadcast_cb(Message(src=self.device_id, dst=-1, ttl=SURVEY_TTL, msg_ID=self.device_msg_ID_cb(), msg=survey_results, kind=MessageType.LANDMARK_SURVEY_RESULTS))
+
+
+    def saw_new_group_message(self):
+        # This function name is a little disengenuous; it means start the new-group process locally
+        self.local_form_group_setup()
+
+
+    def simulation_advanced(self, new_sim_step):
+        self.current_sim_step = new_sim_step
+
+        if self.in_init_group_phase and \
+            (new_sim_step >= GROUP_MSG_PROPOGATE_TIMESPAN + self.sim_step_checkpoint):
+
+            self.in_init_group_phase = False
+            self.sim_step_checkpoint = new_sim_step
+            self.survey_landmark_routes()
+            print("Init group phase complete")
+            return
+
+        if self.in_survey_phase and \
+            (new_sim_step >= SURVEY_TIMESPAN + self.sim_step_checkpoint):
+
+            self.in_survey_phase = False
+            self.sim_step_checkpoint = new_sim_step
+
+            # non-self.coalesce_responsible nodes are merely shadowing this phase
+            self.in_coalesce_phase = True
+            self.coalesce_survey_routes()
+            print("Survey phase complete")
+            return
+
+        if self.in_coalesce_phase and \
+            (new_sim_step >= SURVEY_TIMESPAN + self.sim_step_checkpoint):
+
+            self.in_coalesce_phase = False
+            self.sim_step_checkpoint = new_sim_step
+
+            if self.coalesce_responsible:
+                self.in_group_finalize_phase = True
+                self.device_broadcast_cb(Message(src=self.device_id, dst=-1, msg_ID=self.device_msg_ID_cb(), msg=self.group_members, kind=MessageType.GROUP_ANNOUNCE))
+            print("Coalesce phase complete")
+            return
+                
+        if self.in_group_finalize_phase and \
+            (new_sim_step >= GROUP_MSG_PROPOGATE_TIMESPAN *2 + self.sim_step_checkpoint):
+
+            self.in_group_finalize_phase = False
+            self.sim_step_checkpoint = new_sim_step
+
+            self.group_valid_flag = True
+            print("Group finalize phase complete")
+                
